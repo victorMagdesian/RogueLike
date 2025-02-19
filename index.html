@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+  <meta charset="UTF-8">
+  <title>Rogue-like Refinado</title>
+  <style>
+    /* Estilos básicos e centralização da tela */
+    body {
+      margin: 0;
+      padding: 0;
+      background-color: #000;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      color: #fff;
+      font-family: sans-serif;
+      user-select: none;
+    }
+    canvas {
+      border: 2px solid #fff;
+      /* Para manter o aspecto "pixelado" */
+      image-rendering: pixelated;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="gameCanvas" width="640" height="480"></canvas>
+  <script>
+    /*******************************
+     * Configurações e variáveis
+     *******************************/
+    const TILE_SIZE = 32;   // Tamanho de cada tile (em pixels)
+    const COLS = 20;        // Número de colunas
+    const ROWS = 15;        // Número de linhas
+    const VISION_RADIUS = 5; // Raio de visão do jogador (em tiles)
+    const DUNGEON_STEPS = 300; // Número de passos para o algoritmo de geração (Drunkard Walk)
+    
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    
+    let dungeon = [];      // Matriz que armazena o mapa (0 = parede, 1 = chão)
+    let discovered = [];   // Matriz que indica se o tile já foi visto (para fog of war)
+    let player = { x: 0, y: 0 };
+    let exit = { x: 0, y: 0 };  // Tile de saída (objetivo)
+    
+    /*******************************
+     * Geração Procedural do Dungeon
+     *******************************/
+    function generateDungeon() {
+      // Inicializa o dungeon e o array de descoberta
+      dungeon = [];
+      discovered = [];
+      for (let y = 0; y < ROWS; y++) {
+        dungeon[y] = [];
+        discovered[y] = [];
+        for (let x = 0; x < COLS; x++) {
+          dungeon[y][x] = 0;      // 0 = parede
+          discovered[y][x] = false;
+        }
+      }
+      
+      // Define o ponto de partida: centro do mapa
+      player.x = Math.floor(COLS / 2);
+      player.y = Math.floor(ROWS / 2);
+      
+      // Inicia o algoritmo de "Drunkard Walk"
+      let x = player.x;
+      let y = player.y;
+      dungeon[y][x] = 1; // marca como chão
+      
+      for (let i = 0; i < DUNGEON_STEPS; i++) {
+        // Escolhe uma direção aleatória:
+        // 0: cima, 1: baixo, 2: esquerda, 3: direita
+        let dir = Math.floor(Math.random() * 4);
+        if (dir === 0 && y > 1) y--;
+        else if (dir === 1 && y < ROWS - 2) y++;
+        else if (dir === 2 && x > 1) x--;
+        else if (dir === 3 && x < COLS - 2) x++;
+        dungeon[y][x] = 1; // marca como chão
+      }
+      
+      // Define a saída como o chão mais distante do ponto de partida
+      let maxDist = 0;
+      let exitX = player.x;
+      let exitY = player.y;
+      for (let j = 0; j < ROWS; j++) {
+        for (let i = 0; i < COLS; i++) {
+          if (dungeon[j][i] === 1) {
+            let dist = Math.hypot(i - player.x, j - player.y);
+            if (dist > maxDist) {
+              maxDist = dist;
+              exitX = i;
+              exitY = j;
+            }
+          }
+        }
+      }
+      exit.x = exitX;
+      exit.y = exitY;
+    }
+    
+    /*******************************
+     * Campo de Visão e Fog of War
+     *******************************/
+    function updateFOV() {
+      // Marca como "descoberto" todos os tiles dentro do VISION_RADIUS
+      for (let j = 0; j < ROWS; j++) {
+        for (let i = 0; i < COLS; i++) {
+          let dx = i - player.x;
+          let dy = j - player.y;
+          if (dx * dx + dy * dy <= VISION_RADIUS * VISION_RADIUS) {
+            discovered[j][i] = true;
+          }
+        }
+      }
+    }
+    
+    /*******************************
+     * Função de Desenho
+     *******************************/
+    function draw() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      
+      // Desenha cada tile do dungeon
+      for (let j = 0; j < ROWS; j++) {
+        for (let i = 0; i < COLS; i++) {
+          let dx = i - player.x;
+          let dy = j - player.y;
+          let inFOV = (dx * dx + dy * dy <= VISION_RADIUS * VISION_RADIUS);
+          
+          let cellColor;
+          if (inFOV) {
+            // Tiles visíveis: cores mais claras
+            cellColor = (dungeon[j][i] === 1) ? '#888' : '#444';
+          } else if (discovered[j][i]) {
+            // Tiles já vistos, mas fora do campo atual de visão
+            cellColor = (dungeon[j][i] === 1) ? '#444' : '#222';
+          } else {
+            // Nunca vistos
+            cellColor = '#000';
+          }
+          
+          ctx.fillStyle = cellColor;
+          ctx.fillRect(i * TILE_SIZE, j * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+        }
+      }
+      
+      // Desenha a saída (se estiver visível ou já foi descoberta)
+      let exitDx = exit.x - player.x;
+      let exitDy = exit.y - player.y;
+      if (exitDx * exitDx + exitDy * exitDy <= VISION_RADIUS * VISION_RADIUS || discovered[exit.y][exit.x]) {
+        ctx.fillStyle = '#0f0';
+        ctx.fillRect(exit.x * TILE_SIZE, exit.y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+      }
+      
+      // Desenha o jogador (representado por um círculo amarelo)
+      ctx.fillStyle = '#ff0';
+      ctx.beginPath();
+      ctx.arc(player.x * TILE_SIZE + TILE_SIZE / 2, player.y * TILE_SIZE + TILE_SIZE / 2, TILE_SIZE / 2 - 4, 0, 2 * Math.PI);
+      ctx.fill();
+      
+      // Texto informativo na parte inferior
+      ctx.fillStyle = '#fff';
+      ctx.font = "16px sans-serif";
+      ctx.fillText("Use as setas ou WASD para mover", 10, canvas.height - 10);
+    }
+    
+    /*******************************
+     * Movimento e Interação
+     *******************************/
+    function movePlayer(dx, dy) {
+      let newX = player.x + dx;
+      let newY = player.y + dy;
+      // Permite o movimento apenas se estiver dentro dos limites e se o tile for chão
+      if (newX >= 0 && newX < COLS && newY >= 0 && newY < ROWS && dungeon[newY][newX] === 1) {
+        player.x = newX;
+        player.y = newY;
+        updateFOV();
+        checkExit();
+        draw();
+      }
+    }
+    
+    // Verifica se o jogador chegou à saída
+    function checkExit() {
+      if (player.x === exit.x && player.y === exit.y) {
+        setTimeout(() => {
+          alert("Você venceu! Gerando um novo dungeon...");
+          generateDungeon();
+          updateFOV();
+          draw();
+        }, 100);
+      }
+    }
+    
+    // Captura os eventos de teclado
+    window.addEventListener('keydown', function(e) {
+      switch(e.key) {
+        case "ArrowUp":
+        case "w":
+        case "W":
+          movePlayer(0, -1);
+          break;
+        case "ArrowDown":
+        case "s":
+        case "S":
+          movePlayer(0, 1);
+          break;
+        case "ArrowLeft":
+        case "a":
+        case "A":
+          movePlayer(-1, 0);
+          break;
+        case "ArrowRight":
+        case "d":
+        case "D":
+          movePlayer(1, 0);
+          break;
+      }
+    });
+    
+    /*******************************
+     * Inicialização do Jogo
+     *******************************/
+    generateDungeon();
+    updateFOV();
+    draw();
+  </script>
+</body>
+</html>
